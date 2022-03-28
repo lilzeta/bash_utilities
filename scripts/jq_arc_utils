@@ -1,0 +1,396 @@
+#!/bin/bash
+shopt -s expand_aliases
+. "helpers.sh" >/dev/null #2>&1 &
+
+sp_sp="[[:space:]][[:space:]]"
+nope_symbol="!"
+
+fix_filenames () {
+	# no prompt for single quote removal, remove all in dir
+	rename -n "s/'//g" **/*"'"*
+
+	# check for double-space | ! & prompt for remove | exit
+	for node in "$1"/*;
+	do
+		# ec "fixnode: $node"
+		# remove all single quotes and !
+		if [[ "$node" =~ $sp_sp ]] || [[ "$node" =~ $nope_symbol ]] ; then
+			# consecutive spaces are problematic and difficult to see, disallowed
+			confirm_yes "rename consec_sp_or_symbol: \"$node\" to single space with no [ ' ! ] ? " || exit
+			new_name="${node//[[:space:]][[:space:]]/ }"
+			new_name="${new_name//!/}"
+			eval "mv \"$node\" \"$new_name\""
+		fi
+	done
+}
+
+# ask to del/mv/keep from matching sized file colision with prior
+# copied from arc_c TODO better util funcs
+query_del_move_keep () {
+	ec "query_del_move_keep"
+	base_dir="$1"
+	new_ref="$2"
+	o_f="$3"
+	size="$4"
+	ec "o_f: $o_f"
+	dupes=$( cat "$o_f" | jq -r ".[\"$size\"]")
+
+	while true; do
+		ec "*****************del/move/keep***********************"
+            ec "[d] del new ref   \$: rm $new_ref"
+			ec "[s] add new ref   \$: -"
+        for ((i = 0; i < $(ec $dupes | jq ". | length"); i++)); do
+            ec "[$i] mv new ref    \$: mv => $(ec $dupes | jq -r ".[$i]")"
+        done
+        ec "[_/-] ENTER move to first match^ \$: mv => $(ec $dupes | jq -r ".[0]")"
+		ec "*****************************************************"
+        printf "d / 0-9 / [ _/- ] : "
+
+        read ni < /dev/tty
+        def="_" # add item
+		ni=${ni:-$def}
+		case $ni in
+			[Dd]*) # rm only
+				q+="rm \"${base_dir}${new_ref}\"; "
+				unset da_ref # do nothing to json
+				return ;;
+			[Ss]*) # rm only
+                da_ref="n"
+                return ;;
+			[0-9]*) # mv prior (filename has quotes)
+                if [[ $ni -le $(ec $dupes | jq -r ". | length") ]] ; then
+					DUPE=$(ec $dupes | jq -r ".[$ni]")
+					DIR="$(dirname "${base_dir}${DUPE}")"
+					if [[ ! -d "$DIR" ]] ; then
+						q+="nd \"$DIR\" ; " # create DIRs to match other state as needed
+					fi
+		            q+="mv \"${base_dir}${new_ref}\" \"${base_dir}${DUPE}\" ; "
+
+					# pass global back
+                    da_ref="${dupes[$ni]}"
+                    return
+                else
+                    ec "$ni - not in scope of data"
+                    continue
+				fi
+                ;;
+            [-_]*)
+				# this algorithm is the mostly common concurent with this case (mv to first match)
+				DUPE=$(ec $dupes | jq -r ".[0]")
+				DIR="$(dirname "${base_dir}${DUPE}")"
+				if [[ ! -d "$DIR" ]] ; then
+					q+="nd \"$DIR\" ; " # create DIRs to match other state as needed
+				fi
+				q+="mv \"${base_dir}${new_ref}\" \"${base_dir}${DUPE}\"; "
+				# pass global back
+				da_ref="${dupes[0]}"
+				return
+		esac
+	done
+}
+
+reprocess_bin_size_match_other() {
+	ec "__reprocess_bin_size_match_other__"
+	base="$1"
+	node="$2"
+	t_f="$3"
+	o_f="$4"
+	size="$5"
+	# exact not found -> query across size
+	# ec "adding: $node"
+	add=0
+	# ec "dupe size found :"
+	# ec "$size : $node"
+	# for this size get the array with it's wrapper
+	
+	# ec ${members}
+	# query user for delete/keep action
+	# args=("\"$node\"" "${members[@]}")
+	# ec "args: ${args[@]}"
+
+	# "*****************************************************"
+	query_del_move_keep "$base" "$node" "$o_f" "$size"
+	# ${args[@]}
+	# "*****************************************************"
+	# ec ${q[@]}
+	# ec $add
+
+	# if a change on members via query_move_del_pass
+	if [[ -n $rem ]] || [[ ! $add = 0 ]] ; then
+		membersArr=$( cat "$t_f" | jq -r ".[\"$size\"]" )
+		if [[ $verbose_dry_run ]]; then
+			ec ${members[@]}
+			ec "rem: $rem"
+			ec "add: $add"
+			ec "pre members: ${members}"
+		fi
+
+		# if there is a removal index
+		if [[ -n $rem ]] ; then
+			members=( "${members[@]:0:$rem}" "${members[@]:$((rem+1))}" )
+		fi
+		members=$( ec "${members[@]}" | jq -s . )
+		if [[ -n $da_ref ]] ; then
+			if [[ $da_ref = "n" ]]; then
+				members=$( ec "${members[@]}" | jq -s ".[] + [\"$node\"]")
+			else
+				new_location=$( cat "$o_f" | jq -r ".[\"$size\"]" | jq -r ".[$da_ref]" )
+				members=$( ec "${members[@]}" | jq -s ".[] + [\"$new_location\"]")
+			fi
+		fi
+		if [[ $verbose_dry_run ]]; then
+			ec "*****************************************************"
+			ec "post members: ${members[@]}"
+			ec "*****************************************************"
+		fi
+		ec $( jq -r ".[\"$size\"] |= ${members[@]} " <<< "$t_son" ) > "$t_f"
+	fi
+}
+
+# keep as exact copy from arc_c till we modularize (TODO)
+# ask what to del/keep from matching sized file
+query_del_keep () {
+	base_dir="$1"
+	new_ref="$2"
+	t_f="$3"
+	size="$4"
+	dupes=$( cat "$t_f" | jq -r ".[\"$size\"]")
+	while true; do
+        # #dupes=$( ec $2 | jq .[] )
+		ec "************del_new/del[n]/keep_all******************"
+        ec "[r] rm: \"$new_ref\" - remove the file in the new ref "
+        for ((i = 0; i < $(ec $dupes | jq ". | length"); i++)); do
+            ec "[$i] rm: $(ec $dupes | jq ".[$i]") - remove prev item"
+        done
+        ec "[_/-] add new dupe size item to list"
+		ec "*****************************************************"
+        printf "r / 0-9 / [ _/- ] : "
+
+        read ni < /dev/tty
+        def="_" # add item
+		ni=${ni:-$def}
+		case $ni in
+			[Rr]*) # rm only
+                q+="rm \"${base_dir}${new_ref}\"; "
+                add=0
+                unset rem
+                return ;;
+			[0-9]*) # rm prior (filename has quotes)
+                if [[ $ni -le $(ec $dupes | jq ". | length") ]] ; then
+		            q+="rm \"${base_dir}$(ec $dupes | jq -r ".[$ni]")\"; "
+                    rem="$ni"
+                    add=1
+                    return
+                else
+                    ec "$ni - not in scope of data"
+                    continue
+				fi
+                ;;
+            [-_]*)
+                add=1
+                unset rem
+                return ;;
+		esac
+	done
+}
+
+# not found in bin but bin exists -> add new size ref in node array for this size
+reprocess_bin_size_match_self () {
+	ec "_reprocess_bin_size_match_self_"
+	base="$1"
+	node="$2"
+	t_f="$3"
+	size="$4"
+
+	# ec "adding: $node"
+	add=0
+	# ec "dupe size found :"
+	# ec "$size : $node"
+	# for this size get the array with it's wrapper
+	
+	# query user for delete/keep action
+	# args=("\"$node\"" "${members[@]}")
+	# ec "args: ${args[@]}"
+
+	# "*****************************************************"
+	query_del_keep "$base" "$node" "$t_f" "$size"
+	# ${args[@]}
+	# "*****************************************************"
+	# ec ${q[@]}
+	# ec $add
+	if [[ -n $rem ]] || [[ ! $add = 0 ]] ; then
+		membersArr=$( cat "$t_f" | jq -r ".[\"$size\"]" )
+		if [[ $verbose_dry_run ]]; then
+			ec ${members[@]}
+			ec "rem: $rem"
+			ec "add: $add"
+			ec "pre members: ${members}"
+		fi
+
+		# if there is a removal index
+		if [[ -n $rem ]] ; then
+			members=( "${members[@]:0:$rem}" "${members[@]:$((rem+1))}" )
+		fi
+		members=$( ec "${members[@]}" | jq -s . )
+		# ec "members: ${members[@]}"
+		# if $add -> add new entry
+		if [[ ! $add = 0 ]] ; then
+			members=$( ec "${members[@]}" | jq ".[] + [\"$node\"]")
+		fi
+		if [[ $verbose_dry_run ]]; then
+			ec "*****************************************************"
+			ec "post members: ${members[@]}"
+			ec "*****************************************************"
+		fi
+		ec $( jq -r ".[\"$size\"] |= ${members[@]} " <<< cat "$t_f" ) > "$t_f"
+	fi
+}
+
+proc_dir () {
+	if [ $# -le 2 ]; then
+		ec "usage: proc_dir [base_dir] [dir_sub_base] [target_ref_dir] ?[other_ref_file_dir] ?i ?t"
+		ec "collision: self = q & ask delete which or keep both"
+		ec "collision: other = q & ask to move, delete, or keep"
+		peace # fatal
+	fi
+	if [[ ! -n $1 ]] || [[ ! -n $2 ]] || [[ ! -d $1 ]] || [[ ! -d ${1}$2 ]]; then
+		ec "**** ERROR ****"
+		ec "base: \"$base\" & sub_dir: \"$dir_sub_base\" must both be valid dirs"
+		ec "is the jq invalid?"
+		peace # fatal
+	fi
+	base="$1"
+	dir_sub_base="$2"
+	
+    files_dir="${base}${dir_sub_base}"
+	ref_file_dir=$3
+	# possibly null, treat as read only
+	other_ref_file_dir=$4
+
+	ec "base: $base"
+	ec "dir_sub_base: $dir_sub_base"
+	ec "files_dir: $files_dir"
+	ec "ref_file_dir: $ref_file_dir"
+	ec "other_ref_file_dir: $other_ref_file_dir"
+	ec "${ref}/*"
+
+	# fix dir if ..
+	fix_filenames "${files_dir}"
+	get_base_relative_ref="^${base}(.*)$"
+	for node in "${files_dir}"/* ; do
+		ec "node: $node "
+		if [[ -d $node ]] ; then
+			[[ $node =~ $get_base_relative_ref ]] && proc_dir "${base}" "${BASH_REMATCH[1]}" $ref_file_dir $other_ref_file_dir
+		# TODO -d $node
+		elif [[ -f $node ]] ; then
+			# stat -c '%n %s' x.txt
+			size=$(stat -c '%s' "$node")
+			# use base relative ref
+			#full_ref="$node"
+			[[ $node =~ $get_base_relative_ref ]] && node="${BASH_REMATCH[1]}"
+			ec "$size : $node"
+			#continue
+			if [[ $size -le 2000000 ]] ; then
+				continue
+			fi
+			# use bucket 1MB * (2^i) where 1MB * 2^(i-1) < size < 1MB * (2^i)
+			bin=4000000
+
+			# double till larger, (TODO use log formula instead)
+			while [[ $bin -le $size ]]
+			do
+				bin=$(($bin*2))
+			done
+			# self (update it)
+			t_f="$ref_file_dir/$bin"
+
+			# ***self-other***
+			# looking for self-other collision: 
+			# self ref set in self-self check already (skip collisions)
+			if [[ -n $other_ref_file_dir ]] ; then
+				# ec "___other_ref_file_dir=>"
+				if [[ ! -d $other_ref_file_dir ]] ; then
+					ec "\$ $other_ref_file_dir dir not found"
+					peace
+				fi
+				# other (immutable)-heshticniac-dont-probic
+				o_f="$other_ref_file_dir/$bin"
+				# o_son is current jq state of target file
+				o_son="$( jq -r . $o_f )"
+				# no collision => skip
+				if [[ ! -f "$o_f" ]] || [[ ! $( ec "$o_son" | jq -r . | jq "has(\"$size\")" ) = "true" ]] ; then
+					continue
+				fi
+				members=$( ec "$o_son" | jq -r ".[\"$size\"]" ) # .[] -> str array
+				found=__f
+				for ((i = 0; i < $(ec $members | jq ". | length"); i++)); do
+					this="$(ec $members | jq -r ".[$i]")"
+					# ec "this: $this"
+					# ec "node: $node"
+					if [[ "$this" = "$node" ]] ; then
+						found="$mem"
+						break
+						#ec "mem exists: $mem "
+					fi
+				done
+				# if this exact ref a ref in other we already checked against self
+				if [[ ! $found = __f ]] ; then
+					ec "***match"
+					continue;
+				fi
+				unset da_ref
+				# a colision case for a ref self-other : move where or stay?
+				reprocess_bin_size_match_other "$base" "$node" "$t_f" "$o_f" "$size"
+				# if [[ ! -n $da_ref ]] ; then
+				# 	continue
+				# fi
+				# if new ref (aka from moving to pos of match) 
+				# TODO ?? need to recheck collisions with self below?
+				continue # refs populated via initial self-self round
+			fi
+			# *** self-self ***
+			# if no bin file -> create a single entry file
+			if ! [[ -f "$t_f" ]] ; then
+				# ec "no file -> create single entry file"
+				# add new size w/one entry { "$size": ["$node"] }
+				# echo "{ $size: [$node] }" | jq -R -s -r . | xargs echo
+				ec "t_f: $t_f"
+				ec "{ \"$size\": [\"$node\"] }" | jq -R -s -r '.' > "$t_f"
+				continue
+			fi
+			# tson is current jq state of target file
+			t_son="$( jq -r . $t_f )"
+
+			# if size entry d.n.e. create/update $t_son
+			if ! [[ $( ec "$t_son" | jq -r . | jq "has(\"$size\")" ) = "true" ]] ; then
+				# first item with this exact size
+				# ec "first item with this exact size, add: $t_son"
+				ec $( jq -r ". |= . + { \"$size\": [\"$node\"] }" <<< "$t_son" ) > "$t_f"
+				continue
+			fi
+
+			# exact size in this bin exists, first check for same ref location
+			members=$( ec "$t_son" | jq -r ".[\"$size\"]" ) # .[] -> str array
+			found=__f
+			for ((i = 0; i < $(ec $members | jq ". | length"); i++)); do
+				this="$(ec $members | jq -r ".[$i]")"
+				ec "this: $this"
+				ec "node: $node"
+				if [[ "$this" = "$node" ]] ; then
+					found="$mem"
+					break
+					#ec "mem exists: $mem "
+				fi
+			done
+
+			# if this exact ref already a ref in self<->self or self<->other .skip
+			if [[ ! $found = __f ]] ; then
+				ec "***match"
+				continue;
+			fi
+
+			# the non-dupe bin-colision case for ref self-self, add it to the bin
+			reprocess_bin_size_match_self "$base" "$node" "$t_f" "$size"
+		fi
+	done
+}

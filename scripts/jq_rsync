@@ -1,0 +1,142 @@
+# #!/bin/bash
+
+shopt -s expand_aliases
+. "helpers.sh" >/dev/null #2>&1 &
+# . "arc_utils" #>/dev/null
+
+# from/to=i/t ...rest=args[@]
+unset i t args
+# pull first 2 int args into from/to => $i/$t or if D.N.E. 0/999 rest to $args[@]
+indexi_t_args "$@"
+
+print_usage () {
+	ec "usage: jq_rsync [from_base_dir] [include_from_ref_name] [to_base_dir] [include_to_ref_name] ?i ?t"
+	ec "i:0 => create include manifest file for ***from*** refs for [from_base_dir][***dir***]"
+	ec "i:1 => create include manifest file for ***to*** refs for [from_base_dir][***dir***]"
+	ec "i:2 => show dry run sync result"
+    ec "i:3 => ask to sync => sync"
+}
+
+if [ ${#args[@]} -le 3 ]; then
+    print_usage
+	peace
+fi
+
+main_base_dir=${args[0]}
+get_main_base_relative_dir="^${main_base_dir}/(.*)$"
+include_main_ref_names=${args[1]}_r_include
+
+if [[ ! -d $main_base_dir ]] ; then
+    ec "from_base_dir not a dir: $main_base_dir"
+    print_usage
+    peace
+fi
+
+ec "i: $i"
+# i=0 setup from refs
+if [ $i -eq 0 ] ; then
+	if [[ -d $include_main_ref_names ]] ; then
+		ec "cannot create scope-ref file: \"$include_main_ref_names\", it is a dir"
+		peace
+	fi
+	if [[ -f $include_main_ref_names ]] ; then
+		confirm_yes "overwrite existing scope-ref file: \"${include_main_ref_names}\"?" || peace
+	fi
+    # fix_filenames "$base" # no ' ! or double spaces
+	dirs=""
+	for node in $main_base_dir/*;
+	do
+		confirm_yes "Include dir: \"$node\"" && {
+			if [ ! ${#dirs} -eq 0 ] ; then
+				dirs+='\n'
+			fi
+			# ec $node
+			if [[ -d $node ]] ; then
+				# for each dir in file "tq" (.dirs[])
+				# get_base_relative_dir="^${base}(.*)$"
+				[[ $node =~ $get_main_base_relative_dir ]] && dirs+=${BASH_REMATCH[1]}
+			fi
+		}
+	done
+
+	ec -e ${dirs[@]} | \
+	jq -R . | jq -s '{"dirs": .}' > $include_main_ref_names
+	((i++))
+fi
+[[ $i -ge $t ]] && peace
+ec "i: $i"
+
+alt_base_dir=${args[2]}
+get_alt_base_relative_dir="^${alt_base_dir}/(.*)$"
+include_alt_ref_names=${args[3]}_r_include
+if [[ ! -d $alt_base_dir ]] ; then
+	ec "alt_base_dir not a dir: $alt_base_dir"
+    print_usage
+	peace
+fi
+# i=1 setup to refs
+if [ $i -eq 1 ] ; then
+	if [[ -d $include_alt_ref_names ]] ; then
+		ec "cannot create scope-ref file: \"$include_alt_ref_names\", it is a dir"
+		peace
+	fi
+	if [[ -f $include_alt_ref_names ]] ; then
+		confirm_yes "overwrite existing scope-ref file: \"${include_alt_ref_names}\"?" || peace
+	fi
+    # fix_filenames "$base" # no ' ! or double spaces
+	dirs=""
+	for node in $alt_base_dir/*;
+	do
+		confirm_yes "Include dir: \"$node\"" && {
+			if [ ! ${#dirs} -eq 0 ] ; then
+				dirs+='\n'
+			fi
+			# ec $node
+			if [[ -d $node ]] ; then
+				# for each dir in file "tq" (.dirs[])
+				# get_base_relative_dir="^${base}(.*)$"
+				[[ $node =~ $get_alt_base_relative_dir ]] && dirs+=${BASH_REMATCH[1]}
+			fi
+		}
+	done
+
+	ec -e ${dirs[@]} | \
+	jq -R . | jq -s '{"dirs": .}' > $include_alt_ref_names
+	((i++))
+fi
+[[ $i -ge $t ]] && peace
+ec "i: $i"
+
+# i=2 rsync setup and dry run
+if [ $i -eq 2 ] ; then
+    if [[ ! -f $include_main_ref_names ]] ; then
+		ec "missing \$include_from_ref_name run i=0"
+	fi
+	if [[ ! -f $include_alt_ref_names ]] ; then
+		ec "missing \$include_to_ref_name run i=1"
+	fi
+	cat $include_main_ref_names | \
+	jq -r '. | .["dirs"]'
+    cat $include_alt_ref_names | \
+	jq -r '. | .["dirs"]'
+
+    exc=('$RECYCLE.BIN' 'lost+found/' 'node_modules/' '.DS_Store' '._.DS_Store')
+    exc+=('build/' 'dist/' '.Trash*' '.git/' '__pycache__/' '*egg-info/')
+
+    inc=()
+    dirs=$(cat $include_main_ref_names | jq '. | .["dirs"]')
+    for ((i = 0; i < $(ec $dirs | jq '. | length'); i++)); do
+        # ec $(ec $dirs | jq -r ".[$i]")
+        sub=$(ec $dirs | jq -r ".[$i]")
+        inc+=("$sub" "$sub/**")
+    done
+    excludes="${exc[@]/#/--exclude=}"
+    includes="${inc[@]/#/--include=}"
+    flags="vr --size-only --prune-empty-dirs --no-perms --no-owner --no-group "
+    e_e rsync -n$flags $excludes $includes --exclude='*' "$main_base_dir/" "$alt_base_dir/"
+    confirm "run it wet?" && {
+        e_e rsync -$flags $excludes $includes --exclude='*' "$main_base_dir/" "$alt_base_dir/"
+    }
+	((i++))
+fi
+[[ $i -ge $t ]] && peace

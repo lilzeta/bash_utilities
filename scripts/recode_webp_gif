@@ -1,0 +1,93 @@
+#!/bin/bash
+shopt -s expand_aliases
+. "helpers.sh" >/dev/null #2>&1 &
+
+get_info () {
+    ec "1: $1"
+    ec "2: $2"
+
+    webpmux -info "$1" > "log"
+    fr=$(awk 'NR==6 {print int(1/$7*1000)-1}' "log")
+    #ec "{ \"fr\": \"$fr\", \"offsets\": {} }" | jq -R -r . > loc
+    info="{ \"fr\": \"$fr\", \"offsets\": {} }"
+    offsets=$(awk 'BEGIN{OFS=":"} NR>=6 { if ($6 > 0 || $5 > 0) print $1$5,$6 }' log | jq -R -c -r 'split("\n") | .[]')
+    for offset in $offsets; do
+        dis=$(ec "$offset" | jq -R -r 'split(":")')
+        # ec $dis
+        index=$(ec $dis | jq '.[0]')
+        x=$(ec $dis | jq '.[1]')
+        y=$(ec $dis | jq '.[2]')
+        info=$(ec $info | jq -r ". | .offsets |= . + { $index: { x: $x, y: $y }}")
+    done
+    ec $info > "$2"
+}
+
+# --------------------------- webp
+in_root='/media/zi/crate/pic_backs/pre/gf/gh'
+out_root='/media/zi/crate/pic_backs/pre/frames'
+cd "$in_root"
+out_wep="$out_root/wep"
+for file in *.webp
+do 
+    ec $file
+    fn="${file##*/}"
+    # ext="${fn##*.}" 
+    f="${fn%.*}"
+    out_dir="$out_wep/$f"
+    nd "$out_dir"
+    get_info "${in_root}/${f}.webp" "$out_wep/${f}.info" 
+    last_frame=$(webpmux -info "$file" | grep "Number of frames: " | rev | cut -d " " -f1 | rev)
+    for i in $(seq 1 $last_frame) 
+    do 
+        webpmux -get frame "$i" "$file" -o "$out_dir/$(printf '%04d' $i).webp"; 
+    done
+done
+
+# mask the holes...
+# python /home/zi/Documents/poo.py "$out_wep"
+
+in_dir="$out_root/wep"
+out_dir='/media/zi/crate/pic_backs/post/frames/wep'
+# # cd "$in_dir"
+cres
+for file in $in_dir/*
+do 
+    if [[ -d $file ]] ; then
+        ec $file
+        dir_n="${file##*/}"
+        ec "$dir_n"
+        # et="${fn##*.}" 
+        #f="${fn%.*}"
+        out="$out_dir/$dir_n"
+        nd "$out"
+        python inference_realesrgan.py -n RealESRGAN_x4plus -i "$file" -o "$out"
+        
+        fr=$(jq -r '.fr' ${file}.info)
+
+        ffmpeg -i "${out}/%04d.png" -filter_complex "palettegen" "$out_dir/${dir_n}.png"
+        ffmpeg -r $fr -i "${out}/%04d.png" -i "$out_dir/${dir_n}.png" -filter_complex "paletteuse" "$out_dir/${dir_n}.gif"
+
+        # rm "$out_dir/${dir_n}.png"
+    fi    
+done
+# ---------------------------
+
+
+# in_dir='/media/zi/x8/rsr/gf/vv_q'
+# cd "$in_dir"
+# o_mp4="$out_dir/mp4"
+# for file in *.mp4
+# do 
+#     ec $file
+#     fn="${file##*/}"
+#     # et="${fn##*.}" 
+#     f="${fn%.*}"
+#     out="$o_mp4/$f"
+#     nd "$out"
+#     ffmpeg -i "$file" "${out}/%05d.png"; 
+# done
+
+
+
+# ffmpeg -r 30 -i "${out}/%04d.png" -pix_fmt yuv420p -f yuv4mpegpipe - |
+#             x265 --y4m - --crf 5 -o test265-2.mkv --rd 3 --psy-rd 3 --rdoq-level 1 --psy-rdoq 5 -o "$out_dir/${dir_n}.mp4"full_t.hevc

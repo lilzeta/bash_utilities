@@ -1,0 +1,148 @@
+#!/bin/bash
+
+# asks to specify move del or nothing for each exact size colision 
+# commands are concat into list for approval before running
+# all single quotes are automatically removed without query!!!
+# double space/! are queried each for removal
+
+shopt -s expand_aliases
+. "jq_arc_utils" #>/dev/null
+. "helpers.sh" >/dev/null #2>&1 &
+
+# from/to=i/t ...rest=args[@]
+unset i t args
+# pull first 2 int args into from/to => $i/$t or if D.N.E. 0/999 rest to $args[@]
+indexi_t_args "$@"
+
+if [ ${#args[@]} -le 1 ]; then
+	ec "usage: ./jq_clean [base_dir] [main/alt/whatever] ?sync-other:[main/alt/whatever] ?i ?t"
+	ec "i:0 => create include manifest file of ***dir*** refs for [base_dir][***dir***]"
+	ec "i:1 => clean all refs in&within manifest file dirs && "
+	ec "create dir tic2 & explicate all refs into size bins/files & query on size colision to move or pass"
+	exit
+fi
+
+if [[ ! -d ${args[0]} ]] ; then
+	ec "base_dir not a dir: ${args[0]}"
+	peace
+fi
+
+if [[ $args =~ $sp_sp ]] ; then
+	# consecutive spaces are problematic and difficult to see
+	ec "base_dir cannot have consecutive spaces: $1"
+	peace
+fi
+
+base="${args[0]}"
+get_base_relative_dir="^${base}(.*)$"
+base_ref_file="arc_${args[1]}"
+ref_files="${args[1]}"
+
+ec "base_dir: $base"
+ec "ref filename: ref_file"
+# ec "~~~ from : to = $i : $t ~~~"
+# [[ $i -ge $t ]] && peace
+
+# i=0 setup
+if [ $i -eq 0 ] ; then
+	if [[ -d $base_ref_file ]] ; then
+		ec "cannot create scope-ref file: \"$base_ref_file\", it is a dir"
+		exit
+	fi
+	if [[ -f $base_ref_file ]] ; then
+		confirm_yes "overwrite existing scope-ref file: \"${base_ref_file}\"?" || peace
+	fi
+    fix_filenames "$base" # no ' ! or double spaces
+	dirs=""
+	for node in $base/*;
+	do
+		confirm_yes "Include dir: \"$node\"" && {
+			if [ ! ${#dirs} -eq 0 ] ; then
+				dirs+='\n'
+			fi
+			# ec $node
+			if [[ -d $node ]] ; then
+				# for each dir in file "tq" (.dirs[])
+				# get_base_relative_dir="^${base}(.*)$"
+				[[ $node =~ $get_base_relative_dir ]] && dirs+=${BASH_REMATCH[1]}
+			fi
+		}
+	done
+	
+	ec -e ${dirs[@]} | \
+	jq -R . | jq -s '{"dirs": .}' > $base_ref_file
+	((i++))
+fi
+[[ $i -ge $t ]] && peace
+
+
+if [[ ! -f $base_ref_file ]] ; then
+	ec "base_ref_file: $ref does not exist run i=0 first"
+	peace
+fi
+
+# file in place we want ref data
+if [[ -f $ref_files ]] ; then
+	ec "cannot create dir where file exists: $ref_files "
+	exit
+fi
+
+if [[ ! -d $ref_files ]] ; then
+	nd $ref_files
+fi
+
+# first run self-self for collisions
+if [ $i -eq 1 ] ; then
+	q=""
+	# for each dir in file "__arc" (.dirs[])
+	while IFS=$'\n' read -r dir; do
+		# use regex to get full path inside quotes that may contain spaces
+		echo "dir: $dir"
+		proc_dir "$base" "$dir" "$ref_files"
+	done <<<"$( jq -c -r '.dirs[]' $base_ref_file)"
+
+	if [[ ${#q} -ge 3 ]] ; then
+		ec "$q"
+		confirm "run these self-sync commands? y/n " || peace
+		ec Yup
+		eval "$q"
+	fi
+	((i++))
+fi
+
+ec "***************done:self**************"
+
+# if other, run self-other
+ec "3? ${#args[@]}: ${args[2]}"
+if [[ ${#args[@]} -ge 3 ]] && [[ ! "${args[2]}" = "self" ]] ; then
+	q=""
+	other_ref_files="${args[2]}"
+	if [[ ! -d $ref_files ]] ; then
+		ec "Please run arc_m on $ref_files before attempting sync-other to $ref_files"
+		exit
+	fi
+	if [[ ! -d $other_ref_files ]] ; then
+		ec "Please run arc_m on $other_ref_files before attempting sync-other to $ref_files"
+		exit
+	fi
+	while IFS=$'\n' read -r dir; do
+		# use regex to get full path inside quotes that may contain spaces
+		echo "dir: $dir"
+		proc_dir "$base" "$dir" "$ref_files" "$other_ref_files"
+	done <<<"$( jq -c -r '.dirs[]' $base_ref_file)"
+	if [[ ${#q} -ge 3 ]] ; then
+		ec "$q"
+		confirm "run these self-sync commands?" || peace
+		ec Yup
+		eval "$q"
+	fi
+	((i++))
+fi
+ec "***************done:other**************"
+
+# jq Note
+# -R=--raw-input -s=-slurp -r=--raw-output -c=--compact-output
+
+# list of actions to take
+
+ec done
