@@ -13,7 +13,7 @@ Most of the rest of the scripts require importing helpers.sh if the relative pat
 WIP/Needs re-testing as now separate from my local configs  
 
 ## jq scripts to deal with the gap rsync has 
-...with moving archived files around on one side of a mirrored archive
+...with moving archived files around on one side of a mirrored archive  
 They are meant mostly for large media files because their sizes are almost always unique  
 It ended up far more complex than was expected and the jq bash syntax is painful  
 
