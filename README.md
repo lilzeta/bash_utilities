@@ -1,4 +1,4 @@
-## List of some scripts i wrote in bash 
+## Some bash utility scripts
 (intermedate to advanced bash users only)  
 otherwise you should consider them unsafe  
 
