@@ -32,11 +32,14 @@ Syncronize two archives after cleanup with jq_clean
 There are lots of comments inline, expect using this to take some work,  
 I'm just starting instructions for these
 
+# ETC
+
 `scripts/recode_webp_gif`  
-Demuxes animated webp into frames (requires webp lib)
+Demuxes animated webp into frames (requires webp lib)  
 Overlays / assembles frames into complete state (this shiz was hard)  
 Upscale (optional)  
 Recode to GIF 
+Dir-refs are hard coded cause it's easier to use imo
 
 `scripts/darc.js`  
 Javascript to go dark mode in many sites (useful for particular places) ...WIP  copy/paste/dev-tools
