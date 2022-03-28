@@ -2,7 +2,7 @@
 (intermedate to advanced bash users only)  
 otherwise you should consider them unsafe  
 
-Stand-alone scripts for full-disk encryption tested working from Ubuntu-live 20/21/22 .latest
+Stand-alone scripts for full-disk encryption tested working from Ubuntu-live 20/21/22 .latest  
 Credit/Follow along this guide: https://help.ubuntu.com/community/Full_Disk_Encryption_Howto_2019  
 The main script  
 `scripts/enc.sh`  
@@ -12,7 +12,8 @@ The chroot script
 Most of the rest of the scripts require importing helpers.sh if the relative path changes
 WIP/Needs re-testing as now separate from my local configs  
 
-## jq scripts to deal with the gap rsync has with moving archived files around on one side  
+## jq scripts to deal with the gap rsync has 
+...with moving archived files around on one side of a mirrored archive
 They are meant mostly for large media files because their sizes are almost always unique  
 It ended up far more complex than was expected and the jq bash syntax is painful  
 
@@ -40,5 +41,4 @@ Recode to GIF
 `scripts/darc.js`  
 Javascript to go dark mode in many sites (useful for particular places) ...WIP  copy/paste/dev-tools
   
-Will clean up more soon and expand instructions.  
-Most of my configs are not included as they cipher out gmbkxjq for a lower dimension keyset.  
+Will clean up more and expand instructions sometime.  
