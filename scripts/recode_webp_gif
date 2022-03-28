@@ -44,7 +44,7 @@ do
 done
 
 # mask the holes...
-# python /home/zi/Documents/poo.py "$out_wep"
+python mask.py "$out_wep"
 
 in_dir="$out_root/wep"
 out_dir='/media/zi/crate/pic_backs/post/frames/wep'
