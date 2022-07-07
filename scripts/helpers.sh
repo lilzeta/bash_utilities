@@ -18,10 +18,11 @@ alias to="touch "
 NOCOLOR='\033[0m'
 PURPLE='\033[0;35m'
 
+# echo & execute
 e__e () {
 	echo -e "${PURPLE}\$: $@${NOCOLOR}" ; "$@" ;
 }
-# secret santa aliased chaining
+# secret santa aliased chaining (passthrough for now)
 alias e_e='e__e '
 
 yes_or_no () {
