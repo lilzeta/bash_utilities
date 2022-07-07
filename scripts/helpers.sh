@@ -63,7 +63,7 @@ function peace {
     exit
 }
 
-# set i & t to first two ints and set args to the rest
+# set i(from) & t(to) to first two ints and set/strip args to the rest
 indexi_t_args () {
   is_num="^[0-9]+$"
   args=()
@@ -81,6 +81,7 @@ indexi_t_args () {
       args+=("$var")
     fi
   done
+  # set defaults if from/to not found
   if ! [[ "$i" =~ $is_num ]] ; then
     i=0
   fi
